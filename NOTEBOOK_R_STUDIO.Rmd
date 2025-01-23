@@ -1,0 +1,431 @@
+---
+title: "AB Final - Alumno: Sergio Sánchez de la Peña"
+output:
+  html_document:
+    df_print: paged
+---
+## Asignatura: Advance Programming for Data Science
+
+Se instalan en caso de que se necesite y se importan las librerías necesarias.
+```{r}
+options(reticulate.pandas_min_version = "0.0.0")
+options(warn = -1)
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(quantmod)
+  library(zoo)
+  library(tidyr)
+  library(reshape2)
+  library(scales)
+  library(stringr)
+  library(corrplot)
+  library(plotly)
+})
+
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(forecast)
+library(zoo)
+library(tidyr)
+library(scales)
+library(stringr)
+library(corrplot)
+library(plotly)
+```
+
+
+Primero se usa python para trabajar con ambos lenguajes:
+
+```{python}
+import pandas as pd
+
+df = pd.read_csv("world_development_data_interpolated.csv")
+df
+```
+Se pasa este df para poder trabajar con R.
+```{r}
+df<- reticulate::py$df
+```
+
+Se tiene la primera toma de contacto con el dataset:
+
+```{r}
+head(df)
+```
+Se ven números de nulos. Se van a ver más adelante cuantos y de qué manera arreglar que R los considere todos los espacios vacíos como nulos.
+
+```{r}
+colSums(is.na(df))
+
+```
+Se ve que hay muchas celdas vacías y que no son reconocidas como NA, se procede a rellenar esos huecos como NA para que R y sus librerías puedan hacer un conteo correcto.
+
+```{r}
+df[df=='']= NA
+
+head(df)
+
+```
+
+```{r}
+colSums(is.na(df))
+
+```
+Se ha reemplado correctamente pero es mejor ver el % de NA.
+```{r}
+porcent_NA= (colSums(is.na(df))/ nrow(df))*100
+sort(porcent_NA, decreasing= TRUE)
+
+```
+Se ve que domestic credit tiene un 88% de nulos. Y que IntermRegion no va a aportar mucho más valor porque es más del 50% de nulos y especificar zonas tan concretas no aporta má valor. Se van a eliminar.
+```{r}
+df= df[, !colnames(df) %in% c("DomCredit.GDP", "IntermRegion")]
+head(df,10)
+
+```
+Se sigue con el análisis exploratorio:
+```{r}
+sapply(df, class)
+
+```
+Solo el año es entero. 3 son caracteres y el resto números decimales. 
+Investigo los caracteres por si hay algún fallo.
+```{r}
+
+# unique(df$Country).count()
+length(unique(df$Country)) 
+```
+Investigo cuales hay:
+```{r}
+df$Country= trimws(df$Country)
+df$Country= tolower(df$Country)
+length(unique(df$Country)) 
+
+unique(df$Country)
+
+```
+Se ve que hay países que no están reconocidos por la ONU. 
+De cualquier modo, no se eliminarán, solo hay 10 países de diferencia
+```{r}
+print(table(df$Country))
+
+```
+Efectivamente, todos los países aparecen correctamente las mismas veces.
+
+### Análisis de correlación con GDP y GDP Growth
+Para la correlacion se necesita seguir limpiando el nombre de las columnas y facilitar el trabajo.
+```{r}
+colnames(df) <- gsub("\\.", "", colnames(df))
+print(colnames(df))
+
+```
+Ahora, sí se puede empezar a trabajar mejor.
+```{r}
+variables_matriz = c('GDP', 'GDPGrowth%', 'PopDens', 'AdolFertRate', 
+                     'AgriValAdd%GDP', 'Exports%GDP', 'FertRate', 'Imports%GDP', 
+                     'InflConsPric%', 'LifeExpBirth', 'MerchTrade%GDP', 
+                     'MortRateU5', 'NetMigr', 'PopTotal', 'RevenueExGrants%GDP', 
+                     'SchEnrollPrim%', 'TaxRevenue%GDP', 'UrbanPopGrowth%')
+
+# Calculate the correlation matrix for available columns
+corr_matriz = cor(df[, variables_matriz], use = "complete.obs")
+
+# Extract correlation between GDP and GDPGrowth%
+correla_gdp = corr_matriz[c("GDP", "GDPGrowth%"), ]
+
+print(correla_gdp)
+```
+Hay datos contradictorios debido a la falta de entendimiento de los kpis. Intento predecir el GDP.
+
+```{r}
+# Linear regression model to predict GDP using the other variables
+gdp_model <- lm(GDP ~ PopDens + AdolFertRate + `AgriValAdd%GDP` + `Exports%GDP` + 
+                FertRate + `Imports%GDP` + `InflConsPric%` + LifeExpBirth + 
+                `MerchTrade%GDP` + MortRateU5 + NetMigr + PopTotal + 
+                `RevenueExGrants%GDP` + `SchEnrollPrim%` + `TaxRevenue%GDP` + 
+                `UrbanPopGrowth%`, data=df)
+
+# Summary of the model
+summary(gdp_model)
+
+```
+El modelo no es bueno. Intentaré crear un modelo de acuerdo al GNICapAtlas.
+
+```{r}
+# Filtering the dataframe for the year 2021
+df_2021 <- subset(df, Year == 2021)
+
+# Sorting the filtered dataframe by GNI/CapAtlas in descending order
+sorted_df_2021_GNICap <- df_2021[order(-df_2021$`GNI/CapAtlas`), ]
+
+# Selecting the top 30 countries
+top_paises_GNICap <- head(sorted_df_2021_GNICap$Country, 30)
+
+# Displaying the names of the top 30 countries
+top_paises_GNICap
+
+```
+
+```{r}
+countries_GDP <- df[df$Country %in% c('switzerland', 'luxembourg', 'norway', 'ireland', 
+                                                   'united states', 'faroe islands', 'denmark', 'cayman islands', 
+                                                   'iceland', 'singapore', 'qatar', 'sweden', 'australia', 
+                                                   'netherlands', 'hong kong sar, china', 'finland', 'austria', 
+                                                   'germany', 'belgium', 'israel', 'canada', 'new zealand', 
+                                                   'macao sar, china', 'united kingdom', 'france', 
+                                                   'united arab emirates', 'japan', 'italy', 'korea, rep.', 
+                                                   'kuwait', 'malta', 'brunei darussalam', 'spain'), ]
+
+ggplot(data = countries_GDP, aes(x = Year, y = `GNI/CapAtlas`, color = Country)) +
+  geom_line() + 
+  geom_point() +  
+  scale_y_continuous(labels = comma) +
+  labs(x = 'Year', y = 'GNICapAtlas', title = 'GNI of Different Countries') +
+  theme_minimal() + 
+  theme(legend.position = "none")
+
+```
+
+```{r}
+df$Country <- trimws(df$Country)  # Remove leading/trailing spaces
+df$Country <- tolower(df$Country)  # Convert to lowercase
+df_2021$Country <- trimws(df_2021$Country)  # Remove leading/trailing spaces
+df_2021$Country <- tolower(df_2021$Country)  # Convert to lowercase for consistent matching
+
+top_paises_GNICap = df_2021[df_2021$Country %in% c('switzerland', 'luxembourg', 'norway', 'ireland', 
+                                                        'united states', 'faroe islands', 'denmark', 'cayman islands', 
+                                                        'iceland', 'singapore', 'qatar', 'sweden', 'australia', 
+                                                        'netherlands', 'hong kong sar, china', 'finland', 'austria', 
+                                                        'germany', 'belgium', 'israel', 'canada', 'new zealand', 
+                                                        'macao sar, china', 'united kingdom', 'france', 
+                                                        'united arab emirates', 'japan', 'italy', 'korea, rep.', 
+                                                        'kuwait', 'malta', 'brunei darussalam', 'spain'), ]
+
+# Plotting the bar chart for GNICapAtlas
+ggplot(top_paises_GNICap, aes(x = reorder(Country, -`GNI/CapAtlas`), y = `GNI/CapAtlas`)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # Flips the chart for better readability
+  labs(title = "GNICapAtlas for Top Countries in 2021", x = "Country", y = "GNICapAtlas") +
+  theme_minimal()
+
+```
+
+```{r}
+# Replace specific country name discrepancies
+df$Country <- gsub("korea, rep.", "korea, rep.", df$Country)
+df$Country <- gsub("hong kong sar, china", "hong kong sar", df$Country)
+df$Country <- gsub("macao sar, china", "macao sar", df$Country)
+df$Country <- gsub("united states", "united states", df$Country)
+df$Country <- gsub("united kingdom", "united kingdom", df$Country)
+
+```
+
+```{r}
+# Select relevant numeric columns for correlation analysis
+numeric_columns <- c("SurfAreaSqKm", "PopDens", "PopGrowth%", "GDP", "GDPGrowth%", "AdolFertRate", 
+                     "AgriValAdd%GDP", "Exports%GDP", "FertRate", "FDINetBoP", 
+                     "GNI/CapAtlas", "GNIAtlas", "GrossCapForm%GDP", "Imports%GDP", "IndValAdd%GDP", 
+                     "InflConsPric%", "LifeExpBirth", "MerchTrade%GDP", "MilExp%GDP", "MobileSubs/100", 
+                     "MortRateU5", "NetMigr", "PopTotal", "RevenueExGrants%GDP", "SchEnrollPrim%", 
+                     "TaxRevenue%GDP", "UrbanPopGrowth%")
+
+# Filtering the dataframe for the top 30 countries across all years
+# se ha excluido Bermuda porque era un valor muy extremo
+top_30_countries_all_years <- df[df$Country %in% c('switzerland', 'luxembourg', 'norway', 'ireland', 
+                                                   'united states', 'faroe islands', 'denmark', 'cayman islands', 
+                                                   'iceland', 'singapore', 'qatar', 'sweden', 'australia', 
+                                                   'netherlands', 'hong kong sar, china', 'finland', 'austria', 
+                                                   'germany', 'belgium', 'israel', 'canada', 'new zealand', 
+                                                   'macao sar, china', 'united kingdom', 'france', 
+                                                   'united arab emirates', 'japan', 'italy', 'korea, rep.', 
+                                                   'kuwait', 'malta', 'brunei darussalam', 'spain'), ]
+
+# Select only the relevant numeric columns for analysis
+top_30_numeric_data <- top_30_countries_all_years[, numeric_columns]
+
+# Compute the correlation matrix
+correlation_matrix <- cor(top_30_numeric_data, use = "complete.obs")
+
+# Extract correlations of GNICapAtlas with the other variables
+gni_correlations <- correlation_matrix["GNI/CapAtlas", ]
+
+# Displaying the correlation numbers
+print(gni_correlations)
+
+# Visualizing the correlations with a bar plot (excluding GNICapAtlas itself)
+gni_correlations <- gni_correlations[-which(names(gni_correlations) == "GNI/CapAtlas")]
+
+# Plotting the correlations
+barplot(sort(gni_correlations, decreasing = TRUE), 
+        main = "Correlation of Variables with GNICapAtlas (1973-2021)", 
+        col = "steelblue", 
+        las = 2, 
+        cex.names = 0.6,             # Adjust text size for better fit
+        # xlab = "Variables", 
+        ylab = "Correlation Coefficient", 
+        ylim = c(-1, 1))
+```
+Ahora que tengo las variables que podrían predecir el crecimiento de un país, se va a hacer una regresión lineal, ya que parece que se puede adaptar bien a los datos.
+```{r}
+# Create a named vector of correlations (as per your data)
+correlation_values <- c(
+  SurfAreaSqKm = 0.09774781, PopDens = 0.05277084, PopGrowth = 0.18094622, GDP = 0.19584989,
+  GDPGrowth = -0.23356281, AdolFertRate = -0.44687894, AgriValAddGDP = -0.56299684, ExportsGDP = 0.31260594,
+  FertRate = -0.10915758, FDINetBoP = 0.19746179, GNIAtlas = 0.19550245, GrossCapFormGDP = -0.20641929,
+  ImportsGDP = 0.23870464, IndValAddGDP = -0.34712777, InflConsPric = -0.40860354, LifeExpBirth = 0.70635680,
+  MerchTradeGDP = 0.13786013, MilExpGDP = -0.34191387, MobileSubs100 = 0.72786982, MortRateU5 = -0.59692185,
+  NetMigr = 0.17766053, PopTotal = 0.04597344, RevenueExGrantsGDP = -0.07584525, SchEnrollPrim = -0.04806532,
+  TaxRevenueGDP = -0.11339087, UrbanPopGrowth = 0.02376464
+)
+
+# Use the absolute value of correlations and normalize
+weights <- abs(correlation_values) / sum(abs(correlation_values))
+
+# Display the normalized weights
+weights
+
+```
+
+```{r}
+gni_filtered <- top_30_countries_all_years[, c("GNI/CapAtlas", numeric_columns)]
+
+# Multiply each variable by its weight
+gni_weighted_data <- gni_filtered %>%
+  mutate(
+    SurfAreaSqKm_weighted = SurfAreaSqKm * weights["SurfAreaSqKm"],
+    PopDens_weighted = PopDens * weights["PopDens"],
+    `PopGrowth%_weighted` = `PopGrowth%` * weights["PopGrowth"],
+    GDP_weighted = GDP * weights["GDP"],
+    `GDPGrowth%_weighted` = `GDPGrowth%` * weights["GDPGrowth"],
+    AdolFertRate_weighted = AdolFertRate * weights["AdolFertRate"],
+    `AgriValAdd%GDP_weighted` = `AgriValAdd%GDP` * weights["AgriValAddGDP"],
+    `Exports%GDP_weighted` = `Exports%GDP` * weights["ExportsGDP"],
+    FertRate_weighted = FertRate * weights["FertRate"],
+    FDINetBoP_weighted = FDINetBoP * weights["FDINetBoP"],
+    GNIAtlas_weighted = GNIAtlas * weights["GNIAtlas"],
+    `GrossCapForm%GDP_weighted` = `GrossCapForm%GDP` * weights["GrossCapFormGDP"],
+    `Imports%GDP_weighted` = `Imports%GDP` * weights["ImportsGDP"],
+    `IndValAdd%GDP_weighted` = `IndValAdd%GDP` * weights["IndValAddGDP"],
+    `InflConsPric%_weighted` = `InflConsPric%` * weights["InflConsPric"],
+    LifeExpBirth_weighted = LifeExpBirth * weights["LifeExpBirth"],
+    `MerchTrade%GDP_weighted` = `MerchTrade%GDP` * weights["MerchTradeGDP"],
+    `MilExp%GDP_weighted` = `MilExp%GDP` * weights["MilExpGDP"],
+    `MobileSubs/100_weighted` = `MobileSubs/100` * weights["MobileSubs100"],
+    MortRateU5_weighted = MortRateU5 * weights["MortRateU5"],
+    NetMigr_weighted = NetMigr * weights["NetMigr"],
+    PopTotal_weighted = PopTotal * weights["PopTotal"],
+    `RevenueExGrants%GDP_weighted` = `RevenueExGrants%GDP` * weights["RevenueExGrantsGDP"],
+    `SchEnrollPrim%_weighted` = `SchEnrollPrim%` * weights["SchEnrollPrim"],
+    `TaxRevenue%GDP_weighted` = `TaxRevenue%GDP` * weights["TaxRevenueGDP"],
+    `UrbanPopGrowth%_weighted` = `UrbanPopGrowth%` * weights["UrbanPopGrowth"]
+  )
+
+# Fit the weighted regression model
+weighted_lm <- lm(
+  `GNI/CapAtlas` ~ `SurfAreaSqKm_weighted` + `PopDens_weighted` + `PopGrowth%_weighted` + `GDP_weighted` + 
+  `GDPGrowth%_weighted` + `AdolFertRate_weighted` + `AgriValAdd%GDP_weighted` + `Exports%GDP_weighted` + 
+  `FertRate_weighted` + `FDINetBoP_weighted` + `GNIAtlas_weighted` + `GrossCapForm%GDP_weighted` + 
+  `Imports%GDP_weighted` + `IndValAdd%GDP_weighted` + `InflConsPric%_weighted` + `LifeExpBirth_weighted` + 
+  `MerchTrade%GDP_weighted` + `MilExp%GDP_weighted` + `MobileSubs/100_weighted` + `MortRateU5_weighted` + 
+  `NetMigr_weighted` + `PopTotal_weighted` + `RevenueExGrants%GDP_weighted` + `SchEnrollPrim%_weighted` + 
+  `TaxRevenue%GDP_weighted` + `UrbanPopGrowth%_weighted`,
+  data = gni_weighted_data
+)
+
+```
+
+```{r}
+summary(weighted_lm)
+
+
+library(ggplot2)
+gni_weighted_data <- na.omit(gni_weighted_data)
+gni_weighted_data$Predicted_GNICapAtlas <- predict(weighted_lm)
+
+
+library(ggplot2)
+ggplot(gni_weighted_data, aes(x = `Predicted_GNICapAtlas`, y = `GNI/CapAtlas`)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Observed vs. Predicted GNICapAtlas",
+       x = "Predicted GNICapAtlas",
+       y = "Observed GNICapAtlas") +
+  theme_minimal()
+
+```
+
+```{r}
+# Load necessary library
+library(ggplot2)
+library(dplyr)
+
+# Extract coefficients from the model
+coefficients <- summary(weighted_lm)$coefficients[, 1]  # Get only the estimates
+coefficients <- coefficients[-1]  # Remove intercept
+
+# Create a data frame for plotting
+coef_data <- data.frame(
+  Predictor = names(coefficients),
+  Coefficient = coefficients
+)
+
+# Create the bar plot
+ggplot(coef_data, aes(x = reorder(Predictor, Coefficient), y = Coefficient)) +
+  geom_bar(stat = "identity", fill = ifelse(coef_data$Coefficient > 0, "steelblue", "tomato")) +
+  coord_flip() +  # Flip coordinates for better visibility
+  labs(title = "Weighted Linear Model Coefficients",
+       x = "Predictors",
+       y = "Coefficient Value") +
+  theme_minimal()
+
+```
+### Exponencial
+```{r}
+# Fit the exponential model
+exp_lm <- lm(log(`GNI/CapAtlas`) ~ `SurfAreaSqKm_weighted` + `PopDens_weighted` + 
+             `PopGrowth%_weighted` + `GDP_weighted` + `GDPGrowth%_weighted` + 
+             `AdolFertRate_weighted` + `AgriValAdd%GDP_weighted` + `Exports%GDP_weighted` + 
+             `FertRate_weighted` + `FDINetBoP_weighted` + `GNIAtlas_weighted` + 
+             `GrossCapForm%GDP_weighted` + `Imports%GDP_weighted` + `IndValAdd%GDP_weighted` + 
+             `InflConsPric%_weighted` + `LifeExpBirth_weighted` + `MerchTrade%GDP_weighted` + 
+             `MilExp%GDP_weighted` + `MobileSubs/100_weighted` + `MortRateU5_weighted` + 
+             `NetMigr_weighted` + `PopTotal_weighted` + `RevenueExGrants%GDP_weighted` + 
+             `SchEnrollPrim%_weighted` + `TaxRevenue%GDP_weighted` + `UrbanPopGrowth%_weighted`,
+             data = gni_weighted_data)
+
+# View summary of the model
+summary(exp_lm)
+
+# Create predictions
+gni_weighted_data$Predicted_GNICapAtlas_exp <- exp(predict(exp_lm))
+
+# Plot observed vs. predicted values
+library(ggplot2)
+
+ggplot(gni_weighted_data, aes(x = `Predicted_GNICapAtlas_exp`, y = `GNI/CapAtlas`)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "blue") +
+  labs(title = "Observed vs. Predicted GNICapAtlas (Exponential Model)",
+       x = "Predicted GNICapAtlas (Exponential)",
+       y = "Observed GNICapAtlas") +
+  theme_minimal()
+
+```
+Se hace un modelo exponencial debido a la distribución y naturaleza de los datos, viendo en la regresión lineal que se podrían ajustar más los datos. Efectivamente, es mejor modelo, tiene mejor r-squared.
+
+
+## Conclusiones
+
+Los predictores que influyen más sobre el modelos son:
+UrbanPopGrowth_weighted: Representa el crecimiento de la población urbana y destaca como el predictor más significativo con un coeficiente positivo sobresaliente.
+FertRate_weighted: La tasa de fertilidad también tiene un impacto considerable en la predicción.
+PopGrowth_weighted: El crecimiento total de la población tiene un efecto negativo importante.
+MilExpGDP_weighted: El gasto militar relativo al PIB muestra una contribución negativa significativa.
+
+Otros predictores, como GrossCapFormGDP_weighted y ExportsGDP_weighted, contribuyen de manera positiva, aunque con menor intensidad. Así como, ImportsGDP_weighted y AgriValAddGDP_weighted que tienen, en este caso, impactos negativos más moderados.
+
+
+El crecimiento de la población urbana y una tasa de fertilidad adecuada son los factores más relevantes y positivos en la predicción de la calidad de vida. Esto sugiere que los países con crecimiento urbano controlado y niveles de natalidad equilibrados tienden a ofrecer mejores condiciones de vida.
+
+Sin embargo, el gasto militar y el crecimiento de la población tienen impactos negativos, lo que podría reflejar una mala gestión de recursos o una mayor presión sobre los servicios básicos.
